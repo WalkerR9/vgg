@@ -2,3 +2,5 @@
 venv/
 
 data/
+
+vgg_transfer_model.keras
