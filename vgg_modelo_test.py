@@ -9,11 +9,11 @@ from tensorflow.keras.applications import VGG16
 # ---------------------------
 # Parámetros
 # ---------------------------
-MODEL_PATH = "vgg_transfer_model.h5"
+MODEL_PATH = "vgg_transfer_model.keras"
 train_dir = "data/train"
 validation_dir = "data/validation"
 IMG_SIZE = (224, 224)
-BATCH_SIZE = 32
+BATCH_SIZE = 4
 EPOCHS = 10
 
 # ---------------------------
@@ -98,8 +98,6 @@ while True:
     faces = face_cascade.detectMultiScale(gray, 1.3, 5)
 
     for (x, y, w, h) in faces:
-        cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
-
         face = frame[y:y+h, x:x+w]
         face = cv2.resize(face, IMG_SIZE)
         face = face.astype("float32") / 255.0
@@ -108,7 +106,19 @@ while True:
         preds = model.predict(face)
         class_id = np.argmax(preds)
         confidence = np.max(preds)
-        label = f"{class_names[class_id]} ({confidence:.2f})"
+        confidence_pct = confidence * 100
+
+        # Definir etiqueta y color según confianza
+        if confidence_pct >= 80:
+            label = f"{class_names[class_id]}: {confidence_pct:.1f}%"
+            color = (36, 255, 12)  # Verde
+        else:
+            label = "Desconocido"
+            color = (0, 0, 255)  # Rojo
+
+        # Dibujar rectángulo
+        cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
+
 
         cv2.putText(frame, label, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX,
                     0.9, (36,255,12), 2)

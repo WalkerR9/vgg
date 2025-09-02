@@ -22,9 +22,8 @@ if gpus:
 IMG_SIZE = (224, 224)
 BATCH_SIZE = 4
 EPOCHS = 10
-NUM_CAPTURES = 300
+NUM_CAPTURES = 100
 MODEL_PATH = "vgg_transfer_model.keras"
-CLASS_NAMES_PATH = "class_names.txt"
 
 # ---------------------------
 # Funciones
@@ -101,26 +100,39 @@ def create_datasets(train_dir="data/train"):
     return dataset
 
 def get_model(num_classes):
-    """
-    Carga o crea un modelo VGG16 y lo prepara para el entrenamiento.
-    """
     if os.path.exists(MODEL_PATH):
         print("Cargando modelo existente...")
-        model = load_model(MODEL_PATH)
+        old_model = load_model(MODEL_PATH)
+
+        old_classes = old_model.output_shape[-1]
+        if old_classes == num_classes:
+            print("El número de clases no cambió. Reusando el modelo completo.")
+            model = old_model
+        else:
+            print(f"Ajustando la última capa: {old_classes} -> {num_classes}")
+            # Quitamos la última capa y creamos una nueva salida
+            x = old_model.layers[-2].output
+            new_output = Dense(num_classes, activation="softmax", name=f"dense_out_{num_classes}")(x)
+            model = tf.keras.Model(inputs=old_model.input, outputs=new_output)
     else:
         print("Creando modelo nuevo...")
         base_model = VGG16(weights="imagenet", include_top=False, input_shape=(IMG_SIZE[0], IMG_SIZE[1], 3))
         base_model.trainable = False
 
-        model = Sequential([
-            base_model,
-            Flatten(),
-            Dense(256, activation="relu"),
-            Dropout(0.5),
-            Dense(num_classes, activation="softmax")
-        ])
+        x = Flatten()(base_model.output)
+        x = Dense(256, activation="relu", name="dense_hidden")(x)
+        x = Dropout(0.5)(x)
+        output = Dense(num_classes, activation="softmax", name=f"dense_out_{num_classes}")(x)
 
-    model.compile(optimizer="adam", loss="categorical_crossentropy", metrics=["accuracy"])
+        model = tf.keras.Model(inputs=base_model.input, outputs=output)
+
+    # Fine-tuning
+    for layer in model.layers:
+        layer.trainable = True
+
+    model.compile(optimizer=tf.keras.optimizers.Adam(1e-5),
+                  loss="categorical_crossentropy",
+                  metrics=["accuracy"])
     return model
 
 def train_model(model, train_dataset, validation_dataset):
@@ -130,65 +142,10 @@ def train_model(model, train_dataset, validation_dataset):
     print("Iniciando entrenamiento...")
     model.fit(train_dataset, epochs=EPOCHS, validation_data=validation_dataset)
     model.save(MODEL_PATH)
-    with open(CLASS_NAMES_PATH, "w") as f:
+    with open("class_names.txt", "w") as f:
         for cname in train_dataset.class_names:
             f.write(cname + "\n")
     print("Entrenamiento completado y modelo guardado.\n")
-
-def run_visor(model, class_names):
-    """
-    Ejecuta el modo de visualización y predicción en tiempo real.
-    Permite cambiar al modo admin con la tecla 'a'.
-    """
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        print("Error: No se pudo abrir la cámara.")
-        return 'quit'
-
-    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-    print("\n--- Modo VISOR ---")
-    print("Presione 'a' para ir a modo ADMIN o 'q' para salir.")
-
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = face_cascade.detectMultiScale(gray, 1.3, 5)
-
-        for (x, y, w, h) in faces:
-            face = cv2.resize(frame[y:y+h, x:x+w], IMG_SIZE)
-            face_array = np.expand_dims(face, axis=0) / 255.0
-            
-            predictions = model.predict(face_array, verbose=0)
-            class_idx = np.argmax(predictions)
-            confidence = np.max(predictions)
-            
-            if confidence > 0.5:
-                label = class_names[class_idx]
-                color = (0, 255, 0)
-            else:
-                label = "Desconocido"
-                color = (0, 0, 255)
-
-            cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
-            cv2.putText(frame, f"{label} ({confidence:.2f})", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
-
-        cv2.imshow("Predicción", frame)
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord('q'):
-            cap.release()
-            cv2.destroyAllWindows()
-            return 'quit'
-        elif key == ord('a'):
-            cap.release()
-            cv2.destroyAllWindows()
-            return 'admin'
-    
-    cap.release()
-    cv2.destroyAllWindows()
-    return None
 
 def run_admin():
     """
@@ -205,31 +162,7 @@ def run_admin():
             train_model(model, train_dataset, validation_dataset)
 
 # ---------------------------
-# Bucle principal de control
+# Ejecución directa en modo ADMIN
 # ---------------------------
-current_mode = 'visor'
-while True:
-    if current_mode == 'visor':
-        if not os.path.exists(MODEL_PATH) or not os.path.exists(CLASS_NAMES_PATH):
-            print("Error: No hay un modelo entrenado. Vaya al modo ADMIN para crearlo.\n")
-            current_mode = 'admin'
-            continue
-            
-        try:
-            model = load_model(MODEL_PATH)
-            with open(CLASS_NAMES_PATH) as f:
-                class_names = [line.strip() for line in f]
-            
-            result = run_visor(model, class_names)
-            if result == 'quit':
-                break
-            elif result == 'admin':
-                current_mode = 'admin'
-        except Exception as e:
-            print(f"Ocurrió un error: {e}. Volviendo a modo admin.\n")
-            current_mode = 'admin'
-
-    elif current_mode == 'admin':
-        run_admin()
-        current_mode = 'visor'
-        print("Finalizado modo ADMIN. Volviendo a modo VISOR.")
+if __name__ == "__main__":
+    run_admin()
