@@ -28,9 +28,14 @@ MODEL_PATH = "vgg_transfer_model.keras"
 # ---------------------------
 # Función para capturar caras
 # ---------------------------
-def capture_faces(doc_id):
+def capture_faces(doc_id, margin=20):
     """
-    Captura fotos usando MTCNN para diferentes ángulos.
+    Captura fotos usando MTCNN para diferentes ángulos,
+    sin incluir el marco verde en las imágenes guardadas.
+    Agrega un margen alrededor de la cara para mejorar el recorte.
+    
+    :param doc_id: Identificador de la persona.
+    :param margin: Pixeles extras alrededor de la cara.
     """
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
@@ -51,21 +56,30 @@ def capture_faces(doc_id):
         if not ret:
             break
 
+        # Imagen original sin rectángulo
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         faces = detector.detect_faces(rgb_frame)
 
         for face in faces:
             x, y, w, h = face['box']
-            x, y = max(0, x), max(0, y)
-            cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-            
+            # Ajustar coordenadas para no salirse de la imagen
+            x1 = max(0, x - margin)
+            y1 = max(0, y - margin)
+            x2 = min(frame.shape[1], x + w + margin)
+            y2 = min(frame.shape[0], y + h + margin)
+
+            # Recortar la cara con margen
             if capturing and count < NUM_CAPTURES:
-                face_img = cv2.resize(frame[y:y+h, x:x+w], IMG_SIZE)
+                face_img = cv2.resize(rgb_frame[y1:y2, x1:x2], IMG_SIZE)
+                face_img = cv2.cvtColor(face_img, cv2.COLOR_RGB2BGR)
                 img_name = f"{doc_id}_{count}.jpg"
                 cv2.imwrite(os.path.join(save_dir, img_name), face_img)
                 count += 1
                 cv2.putText(frame, f"Capturando {count}/{NUM_CAPTURES}", (10, 30),
                             cv2.FONT_HERSHEY_SIMPLEX, 1, (36,255,12), 2)
+
+            # Dibujar rectángulo solo en la ventana (sin afectar la imagen guardada)
+            cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
 
         cv2.imshow("Captura de Rostros", frame)
         key = cv2.waitKey(1) & 0xFF
